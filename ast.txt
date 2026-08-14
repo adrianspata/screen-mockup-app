@@ -1,0 +1,9 @@
+(source_file "test2.swift"
+  (import_decl decl_context=0xb99299008 range=[test2.swift:1:1 - line:1:8] trailing_semi module="SwiftUI")
+  (func_decl decl_context=0xb99299008 range=[test2.swift:1:17 - line:1:43] "a()" interface_type="() -> ()" access=internal result="()" thrown_type="<null>"
+    (parameter_list range=[test2.swift:1:23 - line:1:24])
+    (brace_stmt range=[test2.swift:1:26 - line:1:43]
+      (assign_expr type="()" location=test2.swift:1:30 range=[test2.swift:1:28 - line:1:38]
+        (discard_assignment_expr type="@lvalue Glass.Type" location=test2.swift:1:28 range=[test2.swift:1:28 - line:1:28])
+        (dot_self_expr type="Glass.Type" location=test2.swift:1:32 range=[test2.swift:1:32 - line:1:38]
+          (type_expr type="Glass.Type" location=test2.swift:1:32 range=[test2.swift:1:32 - line:1:32] typerepr="Glass"))))))
