@@ -33,7 +33,9 @@ enum DrawerState {
 }
 
 struct EditorView: View {
-    @State private var document = MockupDocument()
+    let session: ProjectSession
+    var document: MockupDocument { session.document }
+    
     @State private var selectedItem: PhotosPickerItem?
     
     enum EditorTool: String, CaseIterable {
@@ -89,8 +91,11 @@ struct EditorView: View {
             let availC = geo.size.height - topInset - collapsedH
             let availE = geo.size.height - topInset - expandedH
             
-            let ratio = document.canvasRatio.ratio(for: document.media, orientation: document.canvasOrientation) ?? (9.0 / 16.0)
-            
+            let firstMedia = document.elements.compactMap { el -> MediaReference? in
+                if case .device(let data) = el.content { return data.media }
+                return nil
+            }.first
+            let ratio = document.canvasRatio.ratio(for: firstMedia, orientation: document.canvasOrientation) ?? (9.0 / 16.0)            
             let availableRatioC = geo.size.width / max(1, availC)
             let widthC = ratio > availableRatioC ? geo.size.width : availC * ratio
             
@@ -103,12 +108,14 @@ struct EditorView: View {
             let currentScale = 1.0 + (targetScale - 1.0) * drawerProgress
             let currentOffsetY = targetOffsetY * drawerProgress
             
+            let hasDevice = document.elements.contains(where: { if case .device = $0.content { return true }; return false })
+            
             ZStack(alignment: .bottom) {
                 // Dark Editor Environment
                 Color.editorBackground.ignoresSafeArea()
                 
                 // Canvas Area
-                if document.media != nil {
+                if hasDevice || !document.elements.isEmpty {
                     MockupCanvasView(document: document)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .padding(.top, topInset)
@@ -143,7 +150,7 @@ struct EditorView: View {
                 VStack {
                     HStack {
                         PhotosPicker(selection: $selectedItem, matching: .any(of: [.images, .videos]), photoLibrary: .shared()) {
-                            Image(systemName: document.media == nil ? "plus" : "photo.badge.arrow.down")
+                            Image(systemName: "photo.badge.plus")
                                 .font(.system(size: 18, weight: .semibold))
                                 .foregroundColor(.white)
                                 .frame(width: 44, height: 44)
@@ -151,7 +158,7 @@ struct EditorView: View {
                                 .clipShape(Circle())
                         }
                         
-                        if document.media != nil {
+                        if hasDevice || !document.elements.isEmpty {
                             Button(action: addTextElement) {
                                 Image(systemName: "textformat")
                                     .font(.system(size: 18, weight: .semibold))
@@ -164,7 +171,7 @@ struct EditorView: View {
                         
                         Spacer()
                         
-                        if document.media != nil {
+                        if hasDevice || !document.elements.isEmpty {
                             if exporter.isExporting {
                                 ZStack {
                                     Circle()
@@ -188,7 +195,7 @@ struct EditorView: View {
                                 .clipShape(Circle())
                             } else {
                                 HStack(spacing: 8) {
-                                    Button(action: { exporter.saveToPhotos(document: document) }) {
+                                    Button(action: { exporter.saveToPhotos(session: session) }) {
                                         Image(systemName: "square.and.arrow.down")
                                             .font(.system(size: 18, weight: .semibold))
                                             .foregroundColor(.white)
@@ -196,7 +203,7 @@ struct EditorView: View {
                                             .background(Color.controlBackground)
                                             .clipShape(Circle())
                                     }
-                                    Button(action: { exporter.share(document: document) }) {
+                                    Button(action: { exporter.share(session: session) }) {
                                         Image(systemName: "square.and.arrow.up")
                                             .font(.system(size: 18, weight: .semibold))
                                             .foregroundColor(.white)
@@ -205,13 +212,21 @@ struct EditorView: View {
                                             .clipShape(Circle())
                                     }
                                     Menu {
-                                        Button(role: .destructive, action: {
-                                            withAnimation(.easeOut(duration: 0.2)) {
-                                                document.media = nil
-                                                selectedItem = nil
+                                        if let selected = document.selectedElementID {
+                                            Button(role: .destructive, action: {
+                                                withAnimation(.easeOut(duration: 0.2)) {
+                                                    document.deleteElement(id: selected)
+                                                }
+                                            }) {
+                                                Label("Remove Selected", systemImage: "trash")
                                             }
-                                        }) {
-                                            Label("Remove Image", systemImage: "trash")
+                                            Button(action: {
+                                                withAnimation(.easeOut(duration: 0.2)) {
+                                                    document.duplicateElement(id: selected)
+                                                }
+                                            }) {
+                                                Label("Duplicate Selected", systemImage: "plus.square.on.square")
+                                            }
                                         }
                                     } label: {
                                         Image(systemName: "gearshape")
@@ -231,7 +246,7 @@ struct EditorView: View {
                 }
                 
                 // Drawer
-                if document.media != nil {
+                if hasDevice || !document.elements.isEmpty {
                     // A. Sliding Sheet (Handle + Active Tools + Full Background)
                     VStack(spacing: 0) {
                         // Drag Handle Area
@@ -251,8 +266,8 @@ struct EditorView: View {
                         VStack {
                             switch activeTool {
                             case .presets: PresetControls(document: document)
-                            case .background: BackgroundControls(document: document)
-                            case .images: ImageControls(document: document)
+                            case .background: BackgroundControls(session: session)
+                            case .images: ImageControls(session: session)
                             case .ratio: RatioControls(document: document)
                             case .text: TextControls(document: document)
                             case .zoom: ZoomControls(document: document)
@@ -354,25 +369,41 @@ struct EditorView: View {
         }
         .onChange(of: selectedItem) { _, newItem in
             Task {
-                if let movie = try? await newItem?.loadTransferable(type: Movie.self) {
-                    withAnimation(.easeIn(duration: 0.25)) {
-                        document.media = .video(movie.url)
+                var importedRef: MediaReference? = nil
+                do {
+                    if let movie = try? await newItem?.loadTransferable(type: Movie.self) {
+                        importedRef = try await session.assetStore.importVideo(from: movie.url, utType: "public.mpeg-4", fileExtension: "mp4")
+                    } else if let data = try? await newItem?.loadTransferable(type: Data.self),
+                       let uiImage = UIImage(data: data) {
+                        guard let jpegData = uiImage.jpegData(compressionQuality: 0.9) else { return }
+                        importedRef = try await session.assetStore.importImage(from: jpegData, utType: "public.jpeg", fileExtension: "jpg")
                     }
-                } else if let data = try? await newItem?.loadTransferable(type: Data.self),
-                   let uiImage = UIImage(data: data) {
-                    withAnimation(.easeIn(duration: 0.25)) {
-                        document.media = .image(uiImage)
+                    
+                    if let ref = importedRef {
+                        let newDevice = CanvasElement(
+                            content: .device(DeviceElementData(media: ref, bezelStyle: .none, showStatusBar: false))
+                        )
+                        await MainActor.run {
+                            withAnimation(.easeIn(duration: 0.25)) {
+                                session.document.insertElement(newDevice)
+                            }
+                        }
                     }
+                } catch {
+                    print("Failed to import media: \(error)")
+                    // The file failed to import or failed to insert.
+                    // The ProjectStore already handles writing atomically, but if we wanted to discard,
+                    // we'd do it here. Currently it stays pending until GC.
                 }
             }
         }
         .sheet(item: Binding(
             get: {
-                if let img = exporter.sharedImage { return ShareItem(item: img) }
+                if let imgURL = exporter.sharedImageURL { return ShareItem(item: imgURL) }
                 if let vid = exporter.sharedVideoURL { return ShareItem(item: vid) }
                 return nil
             },
-            set: { if $0 == nil { exporter.sharedImage = nil; exporter.sharedVideoURL = nil } }
+            set: { if $0 == nil { exporter.sharedImageURL = nil; exporter.sharedVideoURL = nil } }
         )) { item in
             ShareSheet(activityItems: [item.item])
         }
@@ -455,8 +486,7 @@ struct EditorView: View {
         let newText = CanvasElement(
             id: UUID(),
             content: .text(CanvasElement.TextData(string: "New Text", fontName: "System", color: .white)),
-            normalizedPosition: CGPoint(x: 0.5, y: 0.5),
-            scale: 0.15,
+            transform: ElementTransform(normalizedPosition: CGPoint(x: 0.5, y: 0.5), scale: 0.15, rotationDegrees: 0.0, opacity: 1.0),
             zIndex: document.elements.count
         )
         withAnimation {
@@ -578,6 +608,3 @@ struct OldGlassSimulationModifier: ViewModifier {
     }
 }
 
-#Preview {
-    EditorView()
-}

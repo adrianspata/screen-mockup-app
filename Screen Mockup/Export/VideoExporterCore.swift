@@ -10,7 +10,7 @@ enum VideoExportError: Error {
 
 @MainActor
 final class VideoExporterCore {
-    static func exportVideo(document: MockupDocument, sourceURL: URL, outputURL: URL, canvasSize: CGSize, progress: @escaping (Double) -> Void) async throws {
+    static func exportVideo(document: MockupDocument, session: ProjectSession, videoElementID: UUID, sourceURL: URL, outputURL: URL, canvasSize: CGSize, progress: @escaping (Double) -> Void) async throws {
         let asset = AVURLAsset(url: sourceURL)
         guard let videoTrack = try await asset.loadTracks(withMediaType: .video).first else {
             throw VideoExportError.trackNotFound
@@ -49,18 +49,10 @@ final class VideoExporterCore {
         
         // Create a copy of the document for rendering
         let renderDoc = MockupDocument()
-        renderDoc.apply(preset: MockupPreset(
-            id: UUID().uuidString,
-            name: "Temp",
-            background: document.background,
-            backgroundOpacity: document.backgroundOpacity,
-            canvasRatio: document.canvasRatio,
-            canvasOrientation: document.canvasOrientation,
-            bezelStyle: document.bezelStyle,
-            showStatusBar: document.showStatusBar,
-            scale: document.scale,
-            normalizedOffset: document.normalizedOffset
-        ))
+        renderDoc.background = document.background
+        renderDoc.backgroundOpacity = document.backgroundOpacity
+        renderDoc.canvasRatio = document.canvasRatio
+        renderDoc.canvasOrientation = document.canvasOrientation
         renderDoc.elements = document.elements
         
         // Since we can't easily wait for ImageRenderer in a while loop on the main thread without blocking UI updates completely,
@@ -80,10 +72,18 @@ final class VideoExporterCore {
                             let uiImage = UIImage(cgImage: cgImage)
                             
                             // Set the media to an image containing this specific frame
-                            renderDoc.media = .image(uiImage)
+                            let frameID = UUID()
+                            let frameRef = MediaReference(assetID: frameID, kind: .image, pixelSize: uiImage.size, duration: nil)
+                            await session.assetStore.cacheImage(uiImage, for: frameID)
+                            if let index = renderDoc.elements.firstIndex(where: { $0.id == videoElementID }),
+                               case .device(var data) = renderDoc.elements[index].content {
+                                data.media = frameRef
+                                renderDoc.elements[index].content = .device(data)
+                            }
                             
                             // Render the SwiftUI view
                             let rendererView = MockupCompositionView(document: renderDoc, canvasSize: canvasSize)
+                                .environment(\.projectAssetStore, session.assetStore)
                                 .frame(width: canvasSize.width, height: canvasSize.height)
                             
                             let renderer = ImageRenderer(content: rendererView)
