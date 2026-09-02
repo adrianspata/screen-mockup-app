@@ -2,18 +2,29 @@
 import SwiftUI
 
 struct DeviceMockupView: View {
-    let media: MediaItem
+    let media: MediaReference
     let style: BezelStyle
     let showStatusBar: Bool
     
+    @Environment(\.projectAssetStore) private var assetStore
+    @State private var videoURL: URL?
+    
     @ViewBuilder
     private var mediaContent: some View {
-        switch media {
-        case .image(let uiImage):
-            Image(uiImage: uiImage)
-                .resizable()
-        case .video(let url):
-            VideoPlayerView(url: url)
+        switch media.kind {
+        case .image:
+            AssetImageView(reference: media)
+        case .video:
+            if let url = videoURL {
+                VideoPlayerView(url: url)
+            } else {
+                Color.black
+                    .task {
+                        if let store = assetStore {
+                            videoURL = try? await store.url(for: media.assetID)
+                        }
+                    }
+            }
         }
     }
     

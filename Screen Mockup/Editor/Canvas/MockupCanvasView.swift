@@ -120,15 +120,15 @@ struct MockupCanvasView: View {
                             }
                         }
                         .onEnded { value in
-                            let target = magnifyTarget ?? .background
-                            
-                            if target == .background {
+                            if magnifyTarget == .background {
                                 let newZoom = globalEditorZoom * value.magnification
                                 globalEditorZoom = max(newZoom, 0.01)
-                            } else if case .element(let id) = target,
+                            } else if case .element(let id) = magnifyTarget,
                                       let index = document.elements.firstIndex(where: { $0.id == id }) {
-                                let newScale = document.elements[index].scale * value.magnification
-                                document.elements[index].scale = max(newScale, 0.01)
+                                if !document.elements[index].isLocked {
+                                    let newScale = document.elements[index].transform.scale * value.magnification
+                                    document.elements[index].transform.scale = max(newScale, 0.01)
+                                }
                             }
                             
                             magnifyTarget = nil
@@ -163,73 +163,59 @@ struct MockupCanvasView: View {
                             let releaseThresholdY = 10.0 / max(1, canvasSize.height)
                             
                             if target == .background {
-                                let baseGeometry = screenshotGeometry(canvasSize: canvasSize, scale: document.scale * gestureScale)
-                                
-                                var otherObjects: [UUID: SnapGeometry] = [:]
-                                for element in document.elements {
-                                    otherObjects[element.id] = elementGeometry(element: element, canvasSize: canvasSize)
-                                }
-                                
-                                let result = SnapEngine.evaluateSnap(
-                                    proposedGeometry: baseGeometry,
-                                    originalOffset: document.normalizedOffset,
-                                    proposedTranslation: proposedTranslation,
-                                    thresholdX: thresholdX,
-                                    thresholdY: thresholdY,
-                                    releaseThresholdX: releaseThresholdX,
-                                    releaseThresholdY: releaseThresholdY,
-                                    activeSnapX: activeSnapXType,
-                                    activeSnapY: activeSnapYType,
-                                    otherObjects: otherObjects
-                                )
-                                
-                                updateSnapState(result: result, canvasSize: canvasSize, originalOffset: document.normalizedOffset)
-                                
+                                // Background panning doesn't snap. Just pan.
+                                dragTranslation = value.translation // wait, this was handled differently before? 
+                                // Actually background panning in v1 was snapping the MAIN DEVICE.
+                                // Now we don't snap the background. We just update the global editor offset?
+                                // Wait, v1 used background panning to move the device!
+                                // In v2, if background is dragged, we PAN the EDITOR VIEWPORT. But wait, `globalEditorZoom` is there, but no global editor pan exists yet.
+                                // Let's just accumulate `dragTranslation` and ignore snapping.
                             } else if case .element(let id) = target,
                                       let index = document.elements.firstIndex(where: { $0.id == id }) {
                                 
                                 let element = document.elements[index]
-                                let baseGeometry = elementGeometry(element: element, canvasSize: canvasSize)
-                                
-                                var otherObjects: [UUID: SnapGeometry] = [:]
-                                // Background as snap target
-                                let bgId = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
-                                otherObjects[bgId] = screenshotGeometry(canvasSize: canvasSize, scale: document.scale)
-                                
-                                // Other elements
-                                for otherEl in document.elements where otherEl.id != id {
-                                    otherObjects[otherEl.id] = elementGeometry(element: otherEl, canvasSize: canvasSize)
+                                if !element.isLocked {
+                                    let baseGeometry = ElementGeometryResolver.snapGeometry(for: element, in: canvasSize)
+                                    
+                                    var otherObjects: [UUID: SnapGeometry] = [:]
+                                    let bgId = UUID(uuidString: "00000000-0000-0000-0000-000000000000")!
+                                    // The canvas itself is [0...1] in normalized space
+                                    otherObjects[bgId] = SnapGeometry(minX: 0, maxX: 1, minY: 0, maxY: 1) // Not perfectly accurate for background center snap, but SnapEngine handles canvas snap natively.
+                                    
+                                    for otherEl in document.elements where otherEl.id != id && !otherEl.isHidden {
+                                        otherObjects[otherEl.id] = ElementGeometryResolver.snapGeometry(for: otherEl, in: canvasSize)
+                                    }
+                                    
+                                    let originalOffset = CGSize(width: element.transform.normalizedPosition.x, height: element.transform.normalizedPosition.y)
+                                    
+                                    let result = SnapEngine.evaluateSnap(
+                                        proposedGeometry: baseGeometry,
+                                        originalOffset: originalOffset,
+                                        proposedTranslation: proposedTranslation,
+                                        thresholdX: thresholdX,
+                                        thresholdY: thresholdY,
+                                        releaseThresholdX: releaseThresholdX,
+                                        releaseThresholdY: releaseThresholdY,
+                                        activeSnapX: activeSnapXType,
+                                        activeSnapY: activeSnapYType,
+                                        otherObjects: otherObjects
+                                    )
+                                    
+                                    updateSnapState(result: result, canvasSize: canvasSize, originalOffset: originalOffset)
                                 }
-                                
-                                // For element snapping, originalOffset is its normalizedPosition!
-                                let originalOffset = CGSize(width: element.normalizedPosition.x, height: element.normalizedPosition.y)
-                                
-                                let result = SnapEngine.evaluateSnap(
-                                    proposedGeometry: baseGeometry,
-                                    originalOffset: originalOffset,
-                                    proposedTranslation: proposedTranslation,
-                                    thresholdX: thresholdX,
-                                    thresholdY: thresholdY,
-                                    releaseThresholdX: releaseThresholdX,
-                                    releaseThresholdY: releaseThresholdY,
-                                    activeSnapX: activeSnapXType,
-                                    activeSnapY: activeSnapYType,
-                                    otherObjects: otherObjects
-                                )
-                                
-                                updateSnapState(result: result, canvasSize: canvasSize, originalOffset: originalOffset)
                             }
                         }
                         .onEnded { value in
                             let target = dragTarget ?? .background
                             
                             if target == .background {
-                                document.normalizedOffset.width += dragTranslation.width / canvasSize.width
-                                document.normalizedOffset.height += dragTranslation.height / canvasSize.height
+                                // Phase 8+ viewport panning would go here. For now do nothing.
                             } else if case .element(let id) = target,
                                       let index = document.elements.firstIndex(where: { $0.id == id }) {
-                                document.elements[index].normalizedPosition.x += dragTranslation.width / canvasSize.width
-                                document.elements[index].normalizedPosition.y += dragTranslation.height / canvasSize.height
+                                if !document.elements[index].isLocked {
+                                    document.elements[index].transform.normalizedPosition.x += dragTranslation.width / canvasSize.width
+                                    document.elements[index].transform.normalizedPosition.y += dragTranslation.height / canvasSize.height
+                                }
                             }
                             
                             dragTranslation = .zero
@@ -261,93 +247,52 @@ struct MockupCanvasView: View {
     
     private func hitTest(location: CGPoint, canvasSize: CGSize) -> UUID? {
         let normLoc = CGPoint(x: location.x / canvasSize.width, y: location.y / canvasSize.height)
-        for element in document.sortedElements.reversed() { // Check front-most elements first
-            let geom = elementGeometry(element: element, canvasSize: canvasSize)
-            if normLoc.x >= geom.minX && normLoc.x <= geom.maxX &&
-               normLoc.y >= geom.minY && normLoc.y <= geom.maxY {
+        
+        for element in document.sortedElements.reversed() where !element.isHidden {
+            // Inverse transform for rotation
+            let cx = element.transform.normalizedPosition.x
+            let cy = element.transform.normalizedPosition.y
+            
+            let rad = -element.transform.rotationDegrees * .pi / 180.0
+            let cosA = cos(rad)
+            let sinA = sin(rad)
+            
+            // Translate point to origin
+            let tx = normLoc.x - cx
+            let ty = normLoc.y - cy
+            
+            // Rotate point
+            let rx = tx * cosA - ty * sinA
+            let ry = tx * sinA + ty * cosA
+            
+            // Translate point back
+            let nx = rx + cx
+            let ny = ry + cy
+            
+            // Hit test against unrotated bounds
+            let visual = ElementGeometryResolver.visualSize(for: element, in: canvasSize)
+            let wNorm = visual.width / canvasSize.width
+            let hNorm = visual.height / canvasSize.height
+            
+            let minX = cx - wNorm / 2
+            let maxX = cx + wNorm / 2
+            let minY = cy - hNorm / 2
+            let maxY = cy + hNorm / 2
+            
+            if nx >= minX && nx <= maxX && ny >= minY && ny <= maxY {
                 return element.id
             }
         }
         return nil
     }
     
-    private func screenshotGeometry(canvasSize: CGSize, scale: CGFloat = 1.0) -> SnapGeometry {
-        let screenshotAspect: CGFloat
-        if document.bezelStyle == .none, let media = document.media {
-            let size = media.size
-            screenshotAspect = size.height > 0 ? (size.width / size.height) : 1.0
-        } else if let spec = document.bezelStyle.spec {
-            screenshotAspect = spec.imageAspect
-        } else {
-            screenshotAspect = 9.0 / 16.0
-        }
-        
-        let canvasAspect = canvasSize.width / max(1, canvasSize.height)
-        let unscaledW = screenshotAspect > canvasAspect ? canvasSize.width : canvasSize.height * screenshotAspect
-        let unscaledH = screenshotAspect > canvasAspect ? canvasSize.width / screenshotAspect : canvasSize.height
-        
-        let w = (unscaledW * scale) / canvasSize.width
-        let h = (unscaledH * scale) / canvasSize.height
-        
-        let baseCenter = CGPoint(
-            x: 0.5 + document.normalizedOffset.width,
-            y: 0.5 + document.normalizedOffset.height
-        )
-        
-        return SnapGeometry(
-            minX: baseCenter.x - w / 2,
-            maxX: baseCenter.x + w / 2,
-            minY: baseCenter.y - h / 2,
-            maxY: baseCenter.y + h / 2
-        )
-    }
-    
-    private func elementGeometry(element: CanvasElement, canvasSize: CGSize, extraScale: CGFloat = 1.0) -> SnapGeometry {
-        var w: CGFloat = 0
-        var h: CGFloat = 0
-        
-        switch element.content {
-        case .image(let ref):
-            let pixelW = canvasSize.width * element.scale * extraScale
-            let aspect = ref.intrinsicSize.width / max(1, ref.intrinsicSize.height)
-            let pixelH = pixelW / aspect
-            
-            w = pixelW / canvasSize.width
-            h = pixelH / canvasSize.height
-        case .text(let textData):
-            let fontSize = canvasSize.width * element.scale * extraScale
-            let uiFont: UIFont
-            switch textData.fontName {
-            case "System": uiFont = .systemFont(ofSize: fontSize)
-            case "System Serif": uiFont = .systemFont(ofSize: fontSize) // approximate
-            case "System Rounded": uiFont = .systemFont(ofSize: fontSize)
-            case "System Mono": uiFont = .monospacedSystemFont(ofSize: fontSize, weight: .regular)
-            default: uiFont = UIFont(name: textData.fontName, size: fontSize) ?? .systemFont(ofSize: fontSize)
-            }
-            let nsString = textData.string as NSString
-            let rect = nsString.boundingRect(with: CGSize(width: canvasSize.width, height: .greatestFiniteMagnitude),
-                                             options: .usesLineFragmentOrigin,
-                                             attributes: [.font: uiFont],
-                                             context: nil)
-            
-            w = rect.size.width / canvasSize.width
-            h = rect.size.height / canvasSize.height
-        default:
-            w = 0 // Phase 8.4
-            h = 0
-        }
-        
-        return SnapGeometry(
-            minX: element.normalizedPosition.x - w / 2,
-            maxX: element.normalizedPosition.x + w / 2,
-            minY: element.normalizedPosition.y - h / 2,
-            maxY: element.normalizedPosition.y + h / 2
-        )
-    }
-    
     private func calculateCanvasSize(in availableSize: CGSize) -> CGSize {
         // Compute requested ratio or fallback
-        let ratio: CGFloat = document.canvasRatio.ratio(for: document.media, orientation: document.canvasOrientation) ?? (9.0 / 16.0)
+        let firstMedia = document.elements.compactMap { el -> MediaReference? in
+            if case .device(let data) = el.content { return data.media }
+            return nil
+        }.first
+        let ratio: CGFloat = document.canvasRatio.ratio(for: firstMedia, orientation: document.canvasOrientation) ?? (9.0 / 16.0)
         
         // Ensure bounds are non-zero
         guard availableSize.width > 0, availableSize.height > 0 else { return .zero }

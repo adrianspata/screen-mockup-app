@@ -22,25 +22,15 @@ struct MockupCompositionView: View {
                     color
                 case .gradient(let start, let end):
                     LinearGradient(colors: [start, end], startPoint: .topLeading, endPoint: .bottomTrailing)
-                case .image(let uiImage):
-                    Image(uiImage: uiImage)
-                        .resizable()
+                case .image(let ref):
+                    AssetImageView(reference: ref)
                         .aspectRatio(contentMode: .fill)
                 }
             }
             .opacity(document.backgroundOpacity)
             
-            // Mockup Content Layer
-            if let media = document.media {
-                DeviceMockupView(media: media, style: document.bezelStyle, showStatusBar: document.showStatusBar)
-                    // Transform
-                    .scaleEffect(document.scale * activeScale)
-                    .offset(x: (document.normalizedOffset.width * canvasSize.width) + activeTranslation.width,
-                            y: (document.normalizedOffset.height * canvasSize.height) + activeTranslation.height)
-            }
-            
-            // Shared Overlay Layer (Phase 8.0)
-            CanvasOverlayLayer(
+            // Shared Elements Layer
+            CanvasElementsLayer(
                 document: document,
                 canvasSize: canvasSize,
                 activeElementID: activeElementID,

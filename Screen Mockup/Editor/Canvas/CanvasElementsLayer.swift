@@ -1,6 +1,6 @@
 import SwiftUI
 
-struct CanvasOverlayLayer: View {
+struct CanvasElementsLayer: View {
     let document: MockupDocument
     let canvasSize: CGSize
     var activeElementID: UUID? = nil
@@ -14,15 +14,17 @@ struct CanvasOverlayLayer: View {
             // Tie-break with stable UUID to guarantee deterministic layer order when zIndexes match.
             ForEach(document.sortedElements) { element in
                 let isActive = element.id == activeElementID
-                CanvasElementView(
-                    element: element,
-                    canvasSize: canvasSize,
-                    isSelected: document.selectedElementID == element.id,
-                    isEditor: isEditor,
-                    document: document,
-                    activeScale: isActive ? activeElementScale : 1.0,
-                    activeTranslation: isActive ? activeElementTranslation : .zero
-                )
+                if !element.isHidden {
+                    CanvasElementView(
+                        element: element,
+                        canvasSize: canvasSize,
+                        isSelected: document.selectedElementID == element.id,
+                        isEditor: isEditor,
+                        document: document,
+                        activeScale: isActive ? activeElementScale : 1.0,
+                        activeTranslation: isActive ? activeElementTranslation : .zero
+                    )
+                }
             }
         }
         // Ensure the overlay layer itself matches canvas bounds
@@ -40,25 +42,20 @@ struct CanvasElementView: View {
     var activeTranslation: CGSize = .zero
     
     var body: some View {
+        let baseSize = ElementGeometryResolver.baseSize(for: element.content, in: canvasSize)
+        
         Group {
             switch element.content {
+            case .device(let data):
+                DeviceMockupView(media: data.media, style: data.bezelStyle, showStatusBar: data.showStatusBar)
+                    .frame(width: baseSize.width, height: baseSize.height)
             case .image(let ref):
-                if let uiImage = AssetManager.shared.getImage(for: ref.assetID) {
-                    let w = canvasSize.width * element.scale * activeScale
-                    // Base 400 points as reference for "1x" scale on screen
-                    let scaledRadius = ref.cornerRadius * element.scale * activeScale * (canvasSize.width / 400)
-                    Image(uiImage: uiImage)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: w)
-                        .clipShape(RoundedRectangle(cornerRadius: scaledRadius, style: .continuous))
-                } else {
-                    Color.clear
-                        .frame(width: canvasSize.width * element.scale * activeScale)
-                }
+                AssetImageView(reference: ref)
+                    .frame(width: baseSize.width, height: baseSize.height)
+                    // We don't apply rounded corners here unless specified in the model
+                    // For now, keep it simple
             case .text(let textData):
-                let w = canvasSize.width * element.scale * activeScale
-                let font = font(for: textData.fontName, size: w)
+                let font = font(for: textData.fontName, size: baseSize.height) // Base height approximates font size
                 
                 if document.editingTextElementID == element.id {
                     let binding = Binding<String>(
@@ -81,9 +78,8 @@ struct CanvasElementView: View {
                         .font(font)
                         .foregroundColor(textData.color)
                         .multilineTextAlignment(.center)
-                        .frame(minWidth: 100) // allow it to grow
+                        .frame(minWidth: baseSize.width) // allow it to grow
                         .fixedSize(horizontal: true, vertical: false) // natural width
-                        // Optional: close editing on submit
                         .onSubmit {
                             document.editingTextElementID = nil
                         }
@@ -92,7 +88,6 @@ struct CanvasElementView: View {
                         .font(font)
                         .foregroundColor(textData.color)
                         .multilineTextAlignment(.center)
-                        // Make it tappable for double tap
                         .contentShape(Rectangle())
                         .onTapGesture(count: 2) {
                             if isEditor {
@@ -101,31 +96,41 @@ struct CanvasElementView: View {
                         }
                 }
             case .sfSymbol:
-                // Phase 8.4 placeholder
                 Image(systemName: "star.fill")
-                    .font(.system(size: 100))
+                    .resizable()
+                    .scaledToFit()
                     .foregroundColor(.white)
+                    .frame(width: baseSize.width, height: baseSize.height)
             }
         }
+        // 1. Scale
+        .scaleEffect(element.transform.scale * activeScale)
+        // 2. Rotate
+        .rotationEffect(.degrees(element.transform.rotationDegrees))
+        // 3. Opacity
+        .opacity(element.transform.opacity)
+        // 4. Translate (Position)
         .position(
-            x: (element.normalizedPosition.x * canvasSize.width) + activeTranslation.width,
-            y: (element.normalizedPosition.y * canvasSize.height) + activeTranslation.height
+            x: (element.transform.normalizedPosition.x * canvasSize.width) + activeTranslation.width,
+            y: (element.transform.normalizedPosition.y * canvasSize.height) + activeTranslation.height
         )
-        // Selection visualization (Phase 8.2A)
+        // Selection visualization
         .overlay(
             Group {
                 if isSelected && isEditor {
                     Rectangle()
                         .strokeBorder(Color.white.opacity(0.8), lineWidth: 1.5)
                         .shadow(color: .black.opacity(0.3), radius: 2)
-                        // Make it tightly wrap the actual frame
                         .padding(-1)
+                        .frame(width: baseSize.width, height: baseSize.height)
+                        .scaleEffect(element.transform.scale * activeScale)
+                        .rotationEffect(.degrees(element.transform.rotationDegrees))
+                        .position(
+                            x: (element.transform.normalizedPosition.x * canvasSize.width) + activeTranslation.width,
+                            y: (element.transform.normalizedPosition.y * canvasSize.height) + activeTranslation.height
+                        )
                 }
             }
-            .position(
-                x: (element.normalizedPosition.x * canvasSize.width) + activeTranslation.width,
-                y: (element.normalizedPosition.y * canvasSize.height) + activeTranslation.height
-            )
         )
         // Only allow hit testing on elements in editor mode
         .allowsHitTesting(isEditor)
