@@ -16,11 +16,10 @@ enum CanvasRatio: String, CaseIterable, Codable {
     case nineToSixteen = "9:16"
     
     /// Calculates the aspect ratio (width / height) based on the ratio and orientation.
-    func ratio(for media: MediaItem?, orientation: CanvasOrientation) -> CGFloat? {
+    func ratio(for media: MediaReference?, orientation: CanvasOrientation) -> CGFloat? {
         switch self {
         case .original:
-            guard let media = media else { return nil }
-            let size = media.size
+            guard let media = media, let size = media.pixelSize else { return nil }
             if size.height == 0 { return 1.0 }
             
             // If the user wants original ratio, but it's rotated?
