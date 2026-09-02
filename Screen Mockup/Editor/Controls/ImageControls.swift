@@ -3,7 +3,8 @@ import PhotosUI
 import UniformTypeIdentifiers
 
 struct ImageControls: View {
-    let document: MockupDocument
+    let session: ProjectSession
+    var document: MockupDocument { session.document }
     
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var showFileImporter = false
@@ -27,7 +28,7 @@ struct ImageControls: View {
                     Task {
                         if let data = try? await newItem?.loadTransferable(type: Data.self),
                            let uiImage = UIImage(data: data) {
-                            ImageImporter.importImage(uiImage, into: document)
+                            await ImageImporter.importImage(uiImage, into: session)
                         }
                     }
                 }
@@ -38,9 +39,12 @@ struct ImageControls: View {
                 .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.image]) { result in
                     if case .success(let url) = result {
                         if url.startAccessingSecurityScopedResource() {
-                            defer { url.stopAccessingSecurityScopedResource() }
-                            if let data = try? Data(contentsOf: url), let uiImage = UIImage(data: data) {
-                                ImageImporter.importImage(uiImage, into: document)
+                            let securedURL = url // Capture for async context
+                            Task {
+                                defer { securedURL.stopAccessingSecurityScopedResource() }
+                                if let data = try? Data(contentsOf: securedURL), let uiImage = UIImage(data: data) {
+                                    await ImageImporter.importImage(uiImage, into: session)
+                                }
                             }
                         }
                     }
@@ -50,7 +54,7 @@ struct ImageControls: View {
                     PasteButton(payloadType: Data.self) { dataItems in
                         Task { @MainActor in
                             if let data = dataItems.first, let uiImage = UIImage(data: data) {
-                                ImageImporter.importImage(uiImage, into: document)
+                                await ImageImporter.importImage(uiImage, into: session)
                             }
                         }
                     }

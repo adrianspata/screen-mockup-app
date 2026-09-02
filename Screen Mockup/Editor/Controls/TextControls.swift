@@ -75,15 +75,15 @@ struct TextControls: View {
                             .font(.caption)
                             .foregroundColor(.white)
                         Spacer()
-                        Text("\(Int(document.elements[index].scale * 100))")
+                        Text("\(Int(document.elements[index].transform.scale * 100))")
                             .font(.caption.monospacedDigit())
                             .foregroundColor(.gray)
                     }
                     
                     Slider(value: Binding(
-                        get: { document.elements[index].scale },
+                        get: { document.elements[index].transform.scale },
                         set: { newValue in
-                            document.elements[index].scale = newValue
+                            document.elements[index].transform.scale = newValue
                         }
                     ), in: 0.02...1.0, step: 0.01)
                     .tint(.screenyOrange)

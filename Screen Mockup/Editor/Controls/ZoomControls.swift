@@ -6,8 +6,24 @@ struct ZoomControls: View {
     
     var body: some View {
         VStack(spacing: 24) {
+            let scaleBinding = Binding<CGFloat>(
+                get: {
+                    if let id = document.selectedElementID,
+                       let element = document.elements.first(where: { $0.id == id }) {
+                        return element.transform.scale
+                    }
+                    return 1.0
+                },
+                set: { newValue in
+                    if let id = document.selectedElementID,
+                       let index = document.elements.firstIndex(where: { $0.id == id }) {
+                        document.elements[index].transform.scale = newValue
+                    }
+                }
+            )
+            
             // Prominent percentage
-            let percentage = Int(document.scale * 100)
+            let percentage = Int(scaleBinding.wrappedValue * 100)
             Text("\(percentage)%")
                 .font(.system(size: 48, weight: .light))
                 .foregroundColor(.white)
@@ -18,10 +34,7 @@ struct ZoomControls: View {
                     .font(.system(size: 14, weight: .medium))
                     .foregroundColor(.gray)
                 
-                Slider(value: Binding(
-                    get: { document.scale },
-                    set: { document.scale = $0 }
-                ), in: 0.25...2.0)
+                Slider(value: scaleBinding, in: 0.25...2.0)
                 .accentColor(.screenyOrange)
                 
                 Image(systemName: "plus")

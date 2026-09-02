@@ -37,8 +37,11 @@ struct RatioControls: View {
                 HStack(spacing: 12) {
                     ForEach(CanvasRatio.allCases, id: \.self) { ratio in
                         let isActive = document.canvasRatio == ratio
-                        let ratioValue = ratio.ratio(for: document.media, orientation: document.canvasOrientation) ?? 1.0
-                        
+                        let firstMedia = document.elements.compactMap { el -> MediaReference? in
+                            if case .device(let data) = el.content { return data.media }
+                            return nil
+                        }.first
+                        let ratioValue = ratio.ratio(for: firstMedia, orientation: document.canvasOrientation) ?? 1.0
                         Button(action: {
                             withAnimation(.easeInOut(duration: 0.2)) {
                                 document.canvasRatio = ratio
