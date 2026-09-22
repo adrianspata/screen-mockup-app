@@ -1,4 +1,4 @@
-# Screenz (Screen Mockup)
+## Screenz (Screen Mockup)
 
 A native iOS app built with SwiftUI for creating and exporting device mockups.
 
